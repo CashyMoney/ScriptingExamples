@@ -1,0 +1,94 @@
+--[[
+	desc: Handles initialzing the players data by retrieving their data file or making a new one.
+	It then sends the data to the dataModule
+]]
+
+local dataStoreService = game:GetService("DataStoreService")
+local dataStore = dataStoreService:GetDataStore("Data") --This must be the same as the data module
+local dataM = require(game.ServerScriptService:WaitForChild("ModuleScripts"):WaitForChild("DataModule")) --Data module
+local rep = game.ReplicatedStorage
+local events = rep:WaitForChild("Events") --Folder with all of the remote-events
+
+game.Players.PlayerAdded:Connect(function(plr)
+	--Creates leaderstats folder
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+	leaderstats.Parent = plr
+	local file
+	
+	--Determine if the player's file can be foound based on UserID
+	local success, result = pcall(function()
+		
+		file = dataStore:GetAsync(plr.UserId)
+
+	end)
+	
+	--Player's data cannot be loaded, probably an outage by Roblox or API services aren't enabled
+	if success == false then
+		plr:Kick("\n There was an error loading your data! \n Please rejoin! \n \n "..result)
+	else
+		--Adds the fild to the dataModule
+		if file then
+		
+			dataM.add(plr,file)
+	
+		--Creates the player's new data, if they don't already have data
+		else
+			dataM.add(plr,{["Kills"] = 0,
+		 ["Coins"] = 0,
+		 ["Gems"] = 0,
+		 ["ToolEquip"] = 1,
+		 ["Codes"] = {},
+		 ["Rebirths"] = 0,
+		 ["Pets"] = {},
+		 ["PetsEquip"] = {},
+		 ["MaxPetEquip"] = 2,
+		 ["MaxPetInv"] = 25,
+		 ["TotalCoins"] = 0,
+		 ["TotalGems"] = 0,
+		 ["TotalEggsHatched"] = 0,
+		 ["PlayTime"] = 0,
+		 ["TotalKills"] = 0,
+		 ["Islands"] = {},
+		 ["Jumps"] = 0,
+		["GemBoost"] = 0,
+		["CoinBoost"] = 0,
+		["SpecialTitles"] = {}	
+	})
+		end
+	end
+	
+	
+end)
+
+--Returns the data requested from the client
+events:WaitForChild("DataGet").OnServerEvent:Connect(function(plr,key,reqName,all)
+	--[[
+		:param key: the key of the data you're looking for
+		:param reqName: the action you're taking on the data 
+		:param all: boolean, do you want all data or specific
+	]]
+	
+	events.DataGet:FireClient(plr,dataM.get(plr,key,all),reqName)
+end)
+
+--Runs the data save function
+rep.Events:WaitForChild("DataSave").OnServerEvent:Connect(function(plr)
+	dataM.save(plr)
+end)
+
+--Saves the data and removes the player from the data module
+game.Players.PlayerRemoving:Connect(function(plr)
+	dataM.save(plr)
+	dataM.remove(plr)
+end)
+
+--A loop designed to add player playTime
+while wait(20) do
+	for _,plr in pairs(game.Players:GetChildren()) do
+		if plr and plr.Parent and dataM.get(plr,"PlayTime") then
+			dataM.update(plr,{["PlayTime"] = 20},"Add")
+		end
+	end
+end
+
