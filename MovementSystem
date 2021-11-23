@@ -1,0 +1,828 @@
+--[[
+	desc: A dynamic movement system that gives a whole new feeling to movement in game and utilizes tons of custom animations
+]]
+
+-- Declare variables
+local repstorage = game:GetService("ReplicatedStorage")
+local runService = game:GetService("RunService")
+local camera = workspace.CurrentCamera
+
+
+local player = game.Players.LocalPlayer
+local playerScripts = player:WaitForChild('PlayerScripts')
+local playerGui = player:WaitForChild('PlayerGui')
+local character = player.Character or player.CharacterAdded:wait()
+local humanoid = character:WaitForChild('Humanoid')
+local humanoidRootPart = character:WaitForChild('HumanoidRootPart')
+local parts = character:GetChildren()
+local settings = UserSettings():GetService("UserGameSettings")
+
+local dialog = playerGui:WaitForChild("DialogGui")
+
+local walkspeed = humanoid.WalkSpeed
+local jumppower = humanoid.JumpPower
+
+-- move booleans
+local issliding = false
+local isljumping = false
+local iscrouching = false
+local isflipping = false
+local isdiving = false
+local iswjumping = false
+
+local canslide = true
+local canljump = true
+
+local slidetech = false
+local canslidetech = true
+local flipcheck = false
+
+local slidepow = 35 -- slide power
+local ljumppow = 40 -- long jump power
+local divepow = 33 -- dive power
+local cancelpow = 0.9 -- jump cancel (double jump) power
+
+local landboost = 1.15 -- running boost after long jump/slide
+local jumpboost = 1.45 -- for backflip
+
+local slidep = 1000
+local ljumpp = 1000
+local divep = 1000
+
+-- walkspeed during different special moves
+local ljumpwalk = 0.9
+local divewalk = 0.67
+
+-- other important variable
+local touched = false
+local timer = 0
+local jumpcount = 0
+local jumpcancel = false
+local lastfall = false
+local canrun = false
+local runcount = 0
+local smoketick = 0
+local lastcanceltech = false
+
+--local canwalljump = true
+
+--[[
+local Welds = {}
+local function weldBetween(a, b)
+	Welds[#Welds + 1] = {a, b, a.CFrame:toObjectSpace(b.CFrame)}
+	return Welds[#Welds]
+end
+--]]
+
+if character:FindFirstChild("P_Smoke") ~= nil then
+	character:WaitForChild("P_Smoke"):Destroy()	
+end
+
+local smoke = repstorage.CenterSmoke:clone()
+smoke.Parent = character
+smoke.CFrame = humanoidRootPart.CFrame * CFrame.new(Vector3.new(0,-2.5,1.5))
+smoke.CustomPhysicalProperties = PhysicalProperties.new(0.01,1,1)
+smoke.Name = "P_Smoke"
+smoke:WaitForChild("particles1").Enabled = false
+smoke:WaitForChild("particles2").Enabled = false
+smoke:WaitForChild("particles3").Enabled = false
+
+
+
+-- ContextActionService
+local CAS = game:GetService("ContextActionService")
+local UIS = game:GetService("UserInputService")
+
+
+local slide, ljump, crouch, backflip, dive, cancel, fullcancel
+
+local function loadAnimations()
+	repeat runService.RenderStepped:wait() until humanoid
+	
+	-- R15 animations
+	slide = humanoid:LoadAnimation(repstorage.Anims.Slide)
+	ljump = humanoid:LoadAnimation(repstorage.Anims.LongJump)
+	crouch = humanoid:LoadAnimation(repstorage.Anims.Crouch)
+	backflip = humanoid:LoadAnimation(repstorage.Anims.Backflip)
+	dive = humanoid:LoadAnimation(repstorage.Anims.Dive)
+	cancel = humanoid:LoadAnimation(repstorage.Anims.DiveCancel)
+	fullcancel = humanoid:LoadAnimation(repstorage.Anims.JumpCancel)
+end
+
+loadAnimations()
+
+
+local sfxslide = Instance.new("Sound")
+sfxslide.Name = "Slide"
+sfxslide.Parent = humanoidRootPart
+sfxslide.SoundId = "http://www.roblox.com/asset/?id=1031440792"
+sfxslide.Volume = 1.5
+
+local sfxjump = Instance.new("Sound")
+sfxjump.Name = "Jump"
+sfxjump.Parent = humanoidRootPart
+sfxjump.SoundId = "http://www.roblox.com/asset/?id=1031440952"
+sfxjump.Volume = 1
+
+local sfxljump = Instance.new("Sound")
+sfxljump.Name = "LongJump"
+sfxljump.Parent = humanoidRootPart
+sfxljump.SoundId = "http://www.roblox.com/asset/?id=1031441142"
+
+local sfxshield = Instance.new("Sound")
+sfxshield.Name = "Shield"
+sfxshield.Parent = humanoidRootPart
+sfxshield.SoundId = "http://www.roblox.com/asset/?id=1031533229"
+sfxshield.Volume = 0.4
+
+local sfxljump2 = Instance.new("Sound")
+sfxljump2.Name = "LongJump2"
+sfxljump2.Parent = humanoidRootPart
+sfxljump2.SoundId = "http://www.roblox.com/asset/?id=1031613754"
+sfxljump2.Volume = 0.2
+
+local sfxbackflip = Instance.new("Sound")
+sfxbackflip.Name = "Backflip"
+sfxbackflip.Parent = humanoidRootPart
+sfxbackflip.SoundId = "http://www.roblox.com/asset/?id=1031614266"
+sfxbackflip.Volume = 0.2
+
+
+local force = Instance.new("BodyVelocity")
+force.P = 100000
+force.MaxForce = Vector3.new(0, 0, 0)
+force.Velocity = Vector3.new(0, 0, 0)
+force.Parent = humanoidRootPart
+
+local gyro = Instance.new("BodyGyro")
+gyro.P = 100000 --50000
+gyro.D = 100 --300
+gyro.MaxTorque = Vector3.new(0, 0, 0)
+gyro.Parent = humanoidRootPart
+
+
+
+local function RemoveBP()
+	force.MaxForce = Vector3.new(0, 0, 0)
+	force.Velocity = Vector3.new(0, 0, 0)
+	--print("RemoveBP")
+end
+
+local function SetBP(maxforce, velocity, p)
+	force.MaxForce = maxforce
+	force.Velocity = velocity
+	force.P = p
+	--print("SetBP")
+end
+
+
+
+local renderloop = 0
+local lookfactor = 5
+
+local function MakeHitbox(force, duration, size, up)
+	local targetcf
+	if up == false then
+		targetcf = humanoidRootPart.CFrame + (humanoidRootPart.CFrame.lookVector * lookfactor)
+	else
+		targetcf = humanoidRootPart.CFrame + Vector3.new(0, lookfactor, 0)
+	end
+	
+
+	
+	
+	local thisloop = renderloop
+	renderloop = renderloop + 1
+	
+	runService:BindToRenderStep("Loop"..thisloop, Enum.RenderPriority.First.Value, function()
+		
+		
+		if up == false then
+			targetcf = humanoidRootPart.CFrame + (humanoidRootPart.CFrame.lookVector * lookfactor)
+		else
+			targetcf = humanoidRootPart.CFrame + Vector3.new(0, lookfactor, 0)
+		end
+
+	end)
+	
+
+end
+
+
+local function LongJump()
+	if humanoid.PlatformStand == true or humanoidRootPart.Anchored == true then return end
+	if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+	
+	isljumping = true
+	jumpcount = 1
+	
+	--timer = 1
+	
+	--RemoveBP()
+	
+	humanoid.WalkSpeed = walkspeed*ljumpwalk
+	
+	
+	MakeHitbox(15000, 0.45, 5, false)
+	
+	sfxljump2.Pitch = (math.random(-1, 1)/20)+1
+	sfxljump2:Play()
+	
+	humanoid.JumpPower = jumppower * cancelpow
+	jumpcount = 2
+	
+	humanoid.WalkSpeed = walkspeed * landboost
+	
+	repeat
+		runService.RenderStepped:wait()
+	until humanoid:GetState() == Enum.HumanoidStateType.Freefall
+	
+	repeat
+		if not ljump.IsPlaying then
+			ljump:Play()
+		end
+		
+		local look = humanoidRootPart.CFrame.lookVector
+		local vec = Vector3.new(look.X*ljumppow, 0, look.Z*ljumppow)
+		humanoidRootPart.Velocity = (humanoidRootPart.Velocity * Vector3.new(0, 1, 0)) + (vec*1.2)
+		
+		--print(humanoidRootPart.Velocity.X .. ", " .. humanoidRootPart.Velocity.Y .. ", " .. humanoidRootPart.Velocity.Z)
+		--print(timer)
+		
+		--timer = timer - 1
+		
+		runService.RenderStepped:wait()
+		--print(touched)
+		--print("ljumploop")
+	until touched == true or jumpcancel == true or humanoid:GetState() == Enum.HumanoidStateType.Landed or humanoid:GetState() == Enum.HumanoidStateType.Swimming or humanoid.PlatformStand == true or humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0
+	--print(timer)
+	
+	if touched == true then lastcanceltech = true end
+	
+	--RemoveBP()
+	ljump:Stop()
+	
+	canrun = true
+	--timer = 0
+	isljumping = false
+	humanoid.WalkSpeed = walkspeed
+end
+
+
+
+local candive = true
+local function Dive()
+	if humanoid.PlatformStand == true or humanoidRootPart.Anchored == true then return end
+	if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+	--[[
+	if humanoidRootPart:FindFirstChild("WallJumpVel") ~= nil then
+		humanoidRootPart:WaitForChild("WallJumpVel"):Destroy()
+	end	
+	if humanoidRootPart:FindFirstChild("WallJumpGyro") ~= nil then
+		humanoidRootPart:WaitForChild("WallJumpGyro"):Destroy()
+	end
+	--]]
+	
+	if candive == false then return end
+	candive = false
+	isdiving = true
+	jumpcount = 3
+	
+	humanoid.JumpPower = 0
+	--runService.RenderStepped:wait()
+	--print(humanoid.JumpPower)
+	humanoid:ChangeState(3)
+	--humanoidRootPart.Velocity = Vector3.new(humanoidRootPart.Velocity.X, diveboost, humanoidRootPart.Velocity.Z)
+	
+	humanoid.WalkSpeed = walkspeed*divewalk
+	
+	--[[
+	local look = humanoidRootPart.CFrame.lookVector
+	local vec = Vector3.new(look.X*divepow, 0, look.Z*divepow)
+	local force = Vector3.new(13000, 0, 13000)
+	SetBP(force, vec, divep)
+	humanoid.AutoRotate = false
+	--]]
+	
+	humanoid.JumpPower = jumppower * cancelpow
+	--print(humanoid.JumpPower)
+	
+	if not dive.IsPlaying then
+		-- (distance, power, duration, size, yoffset1, yoffset2)
+		MakeHitbox(20000, 0.4, 6, false)
+		
+		dive:Play()
+		sfxljump2.Pitch = (math.random(-1, 1)/20)+1
+		sfxljump2:Play()
+		
+		if humanoid.Health > 0 then
+			smoke.particles3.Enabled = true
+			smoketick = 3
+		end
+	end
+	
+	local thisjumpcount = jumpcount
+	timer = 10
+	
+	repeat
+		local look = humanoidRootPart.CFrame.lookVector
+		local vec = Vector3.new(look.X*divepow, 0, look.Z*divepow)
+		humanoidRootPart.Velocity = (humanoidRootPart.Velocity * Vector3.new(0, 1, 0)) + (vec*1.2)
+		
+		timer = timer - 1
+		runService.RenderStepped:wait()
+		--print(touched)
+	until touched == true or humanoid:GetState() == Enum.HumanoidStateType.Landed or humanoid:GetState() == Enum.HumanoidStateType.Swimming or jumpcount > 3 or humanoid.PlatformStand == true or humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0
+	
+	if touched == true then lastcanceltech = true end
+	
+	dive:Stop()
+	humanoid.JumpPower = jumppower
+	isdiving = false
+end
+
+
+local function Slide(name, state, object)
+	
+	if humanoid.PlatformStand == true or humanoidRootPart.Anchored == true then return end
+	
+	if not humanoidRootPart then return end
+	if humanoid:GetState() == Enum.HumanoidStateType.Swimming then return end
+	if humanoid:GetState() == Enum.HumanoidStateType.Climbing then return end
+	
+	if state == Enum.UserInputState.End then slidetech = false end
+	if slidetech == true then return end
+	if state == Enum.UserInputState.Begin then slidetech = true end
+	if isdiving == true then return end
+	if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+	
+	--if lastfall and touched then return end
+
+	--if Ecooldown > 0 then return end
+	
+	canslidetech = true
+	
+	repeat
+		if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+		
+		if isdiving == false
+		and issliding == false
+		and isljumping == false
+		and humanoid:GetState() == Enum.HumanoidStateType.Freefall
+		and state == Enum.UserInputState.Begin then
+				if jumpcount > 3 then return end
+				Dive()
+			return
+		end
+		
+		if isflipping == true then return end
+		
+		if humanoid:GetState() == Enum.HumanoidStateType.Swimming then return end
+		
+		local movedir = humanoid.MoveDirection
+		if math.abs(movedir.X) + math.abs(movedir.Z) < 0.5 and (humanoid:GetState() == Enum.HumanoidStateType.Running or humanoid:GetState() == Enum.HumanoidStateType.RunningNoPhysics) then
+			if (state == Enum.UserInputState.Begin) then
+				if iscrouching == false then
+					iscrouching = true
+					canslidetech = true
+				end
+			elseif (state == Enum.UserInputState.End) then
+				if iscrouching == true then
+					iscrouching = false
+					crouch:Stop()
+				end
+			end
+		else
+		if issliding == true then return end
+		if isflipping == true then return end
+		if humanoid:GetState() == Enum.HumanoidStateType.Swimming then return end
+		if humanoid:GetState() == Enum.HumanoidStateType.Climbing then return end
+		
+		if canslidetech == true then
+			if (state == Enum.UserInputState.Begin) or iscrouching == true then
+				canslidetech = false
+				iscrouching = false
+				if crouch.IsPlaying then
+					crouch:Stop()
+				end
+				
+				if humanoid:GetState() == Enum.HumanoidStateType.Jumping or lastfall then return end
+				
+				issliding = true
+				settings.RotationType = 0
+				if not slide.IsPlaying then
+					slide:Play()
+					sfxslide.Pitch = (math.random(-1, 1)/10)+1
+					sfxslide:Play()
+				end
+				
+				
+				MakeHitbox(20000, 0.35, 5, false)
+				
+				
+				local slidewait = 0
+					
+				humanoid.WalkSpeed = walkspeed*ljumpwalk
+				--[[
+				local look = humanoidRootPart.CFrame.lookVector
+				local vec = Vector3.new(look.X*slidepow, 0, look.Z*slidepow)
+				local force = Vector3.new(15000, 0, 15000)
+				SetBP(force, vec, slidep)
+				humanoid.AutoRotate = false
+				--]]
+				
+				
+				local slidetick = 0
+				
+				repeat
+					if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+					
+					slidetick = slidetick + 1
+					if slidetick > 18 then humanoid.AutoRotate = true end
+					
+					if isljumping == false then
+						humanoid.JumpPower = jumppower*0.85
+					end
+					--[[
+					local look = humanoidRootPart.CFrame.lookVector
+					local vec = Vector3.new(look.X*slidepow, 0, look.Z*slidepow)
+					local force = Vector3.new(15000, 0, 15000)
+					SetBP(force, vec, slidep)
+					--]]
+					local look = humanoidRootPart.CFrame.lookVector
+					local vec = Vector3.new(look.X*slidepow, 0, look.Z*slidepow)
+					humanoidRootPart.Velocity = (humanoidRootPart.Velocity * Vector3.new(0, 1, 0)) + (vec*1.2)
+					
+					local movedir = humanoid.MoveDirection
+					if humanoid:GetState() == Enum.HumanoidStateType.Jumping and lastfall == false and jumpcount < 2 then
+						slide:Stop()
+						sfxslide:Stop()
+						LongJump()
+						slidetick = 25
+					end
+					
+					runService.RenderStepped:wait()
+					--print("slideloop")
+				until slidetick > 24 or jumpcancel == true or issliding == false or humanoid.PlatformStand == true or humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0
+				
+				canrun = true
+				
+				slide:Stop()
+				humanoid.WalkSpeed = walkspeed
+				if isljumping == false then
+					humanoid.JumpPower = jumppower
+				end
+				--RemoveBP()
+				humanoid.AutoRotate = true
+				issliding = false
+			end
+		end
+	end
+	
+	runService.RenderStepped:wait()
+	until slidetech == false or isflipping == true or humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0
+end
+CAS:BindAction("Slide", Slide, true, Enum.KeyCode.E, Enum.KeyCode.ButtonR2)
+CAS:SetTitle("Slide", "Action")
+CAS:SetPosition("Slide", UDim2.new(0.2, 0, 0.5, 0))
+
+
+local quickfalling = false
+
+local function QuickFall(name, state, object)
+	if quickfalling == true then return end
+	if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then return end
+	quickfalling = true
+	
+	local vel = humanoidRootPart.Velocity
+	humanoidRootPart.Velocity = Vector3.new(vel.X, vel.Y - 50, vel.Z)
+end
+CAS:BindAction("QuickFall", QuickFall, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonR1)
+CAS:SetTitle("QuickFall", "Quick Fall")
+CAS:SetPosition("QuickFall", UDim2.new(-0.1, 0, 0.5, 0))
+
+
+
+local function Raycast(startpos, dir, dist, ignore)
+	local ray = Ray.new(startpos, dir*dist)
+	local hit, pos, lookvec, material = workspace:FindPartOnRayWithIgnoreList(ray, ignore, false, true)
+	return hit, pos, lookvec, material
+end
+
+
+
+local jumpdb = false
+-- jump
+character.Humanoid.StateChanged:connect(function(old,new)
+	--if jumpdb == true then return end
+	
+	if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+	
+	local oldstate = old.Name
+	local newstate = new.Name
+	
+	if oldstate == "Freefall" and newstate == "Jumping" then return end
+	
+	if newstate == "Landed" or newstate == "Swimming" or newstate == "Climbing" then
+		jumpcount = 0
+		jumpcancel = false
+	end
+	if dialog.Left.Visible == true or dialog.Right.Visible == true then return end
+	if newstate ~= "Jumping" then runService.RenderStepped:wait() return end
+	if humanoid.PlatformStand == true or humanoidRootPart.Anchored == true then return end
+	
+	-- backflip
+	if iscrouching == true and isdiving == false and issliding == false and isljumping == false and isflipping == false and isjumping == false then
+		crouch:Stop()
+		iscrouching = false
+		isflipping = true
+		backflip:Play()
+		humanoid.JumpPower = jumppower * jumpboost
+		jumpcount = 2
+		
+		MakeHitbox(13000, 0.35, 5, true)
+	end
+	
+	if (isjumping == false or iscrouching == true) and isdiving == false then
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		if isflipping == false then
+			sfxjump.Pitch = (math.random(-1, 1)/20)+1
+			sfxjump:Play()
+		else
+			sfxbackflip.Pitch = (math.random(-1, 1)/20)+1
+			sfxbackflip:Play()
+		end
+		if humanoid.Health > 0 then
+			smoke.particles3.Enabled = true
+			smoketick = 3
+		end
+	end
+	
+	runService.RenderStepped:wait()
+	if isljumping == false and isdiving == false then
+		humanoid.JumpPower = jumppower
+	end
+	wait(0.5)
+	if isflipping == true then
+		flipcheck = true
+	end
+end)
+
+
+UIS.JumpRequest:Connect(function()
+	if jumpdb == true then return end
+	jumpdb = true
+	
+	delay(0.15, function()
+		jumpdb = false
+	end)
+	
+	print(jumpcount)
+	
+	if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+	
+	--if (state == Enum.UserInputState.Begin) then
+		if dialog.Left.Visible == true or dialog.Right.Visible == true then return end
+		if humanoid.PlatformStand == true or humanoidRootPart.Anchored == true then return end
+		
+		if lastfall and issliding and isdiving == false then return end
+		
+		if lastfall and jumpcount == 0 then 
+			jumpcount = 1
+		end
+		
+		if jumpcount > 1 and issliding == false and isljumping == false and isflipping == false and isdiving == false and jumpcancel == false and lastcanceltech == false then return end
+		
+		if jumpcancel == true and jumpcount > 2 and isdiving == false then return end
+		
+		if jumpcount > 0 then
+			sfxjump.Pitch = (math.random(-1, 1)/20)+1.5
+			sfxjump:Play()
+			if isdiving == true or isljumping == true or isflipping == true or issliding == true or lastcanceltech == true then
+				jumpcancel = true
+				ljump:Stop()
+				dive:Stop()
+				--RemoveBP()
+				humanoid.AutoRotate = true
+				humanoid.WalkSpeed = walkspeed
+				if isdiving == true then
+					cancel:Play()
+				else
+					fullcancel:Play()
+				end
+				
+				if isflipping == true then
+					humanoid.JumpPower = jumppower * cancelpow
+				end
+				
+				if isljumping == true then
+					isljumping = false
+					issliding = false
+					jumpcount = 2
+				end
+				--isdiving = false
+				--isflipping = false
+			end
+		end
+		jumpcount = jumpcount + 1
+		
+		lastcanceltech = false
+		
+		humanoid:ChangeState(3) --jumping
+		if jumpcount == 2 then fullcancel:Play() end
+		
+		if humanoid.Health > 0 then
+			smoke:WaitForChild("particles3").Enabled = true
+			smoketick = 3
+		end
+		
+		--wait()
+		--smoke:WaitForChild("particles3").Enabled = false
+	--end
+end)
+--CAS:BindAction("Jump", Jump, false, Enum.KeyCode.Space)
+
+
+
+humanoid.Touched:connect(function(hit, bodypart)
+	if humanoid.Health <= 0 then return end
+	if hit.CanCollide == false or hit.Parent == nil or hit.Parent == character then return end
+	if bodypart.Parent:IsA("Accoutrement") then return end
+	if humanoid.PlatformStand == true then return end
+	if bodypart.Name ~= "Head" and not bodypart:IsA("MeshPart") then return end
+	if humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then return end
+	
+	--print(hit.Name)
+	
+	if hit.Parent.Name == "SpringModel" then
+		jumpcount = 1
+		touched = false
+	elseif hit.Parent ~= workspace:WaitForChild("DialogBlocks") then
+		touched = true
+	end
+end)
+
+
+
+
+
+local nextfalse = false
+
+runService:BindToRenderStep("MainPlayerLoop", Enum.RenderPriority.First.Value, function()
+	if humanoid.Health <= 0 then
+		smoke:destroy()
+		
+		return
+	end
+	
+	if humanoid.PlatformStand == true or humanoidRootPart.Anchored == true or humanoid.WalkSpeed == 0 or humanoid.JumpPower == 0 then
+		ljump:Stop()
+		dive:Stop()
+		slide:Stop()
+		crouch:Stop()
+		backflip:Stop()
+		fullcancel:Stop()
+		cancel:Stop()
+		
+		smoke.particles1.Enabled = false
+		smoke.particles2.Enabled = false
+		smoke.particles3.Enabled = false
+	return end
+	
+	
+	if not character or not humanoidRootPart or not character:WaitForChild("RightUpperArm") or not humanoid then return end
+	
+	if humanoid:GetState() == Enum.HumanoidStateType.Freefall and not (isflipping or isdiving or isljumping or issliding) then
+		lastfall = true
+	else
+		lastfall = false
+	end
+	
+	local rightcf = character:WaitForChild("RightUpperArm").CFrame
+	local rightori = character:WaitForChild("RightUpperArm").Orientation
+	local rootcf = humanoidRootPart.CFrame
+	local rootori = humanoidRootPart.Orientation
+	
+	smoke.CFrame = rootcf - (rootcf.upVector*2.5)
+	
+	if nextfalse == true then
+		touched = false
+		nextfalse = false
+	end
+	
+	if (humanoid:GetState() == Enum.HumanoidStateType.Landed or humanoid:GetState() == Enum.HumanoidStateType.Swimming
+	or (touched == true and humanoid:GetState() == Enum.HumanoidStateType.Freefall)) then
+		--print("some cancel")
+		dive:Stop()
+		ljump:Stop()
+		humanoid.AutoRotate = true
+		nextfalse = true
+	end	
+	
+	if humanoid:GetState() == Enum.HumanoidStateType.Running or humanoid:GetState() == Enum.HumanoidStateType.Swimming then
+		isjumping = false
+		candive = true
+		quickfalling = false
+	else
+		isjumping = true
+	end
+	
+	if isjumping == true then
+		if humanoid:GetState() == Enum.HumanoidStateType.RunningNoPhysics or humanoid:GetState() == Enum.HumanoidStateType.Running then
+			isjumping = false
+			if humanoid.Health > 0 then smoke.particles3.Enabled = true end
+			smoketick = 3
+		end
+	end
+	
+	local movedir = humanoid.MoveDirection
+	if humanoid.Health > 0 and math.abs(movedir.X) + math.abs(movedir.Z) > 0.5 and (humanoid:GetState() == Enum.HumanoidStateType.RunningNoPhysics or humanoid:GetState() == Enum.HumanoidStateType.Running) then
+		smoke.particles1.Enabled = true
+		smoke.particles2.Enabled = true
+	else
+		smoke.particles1.Enabled = false
+		smoke.particles2.Enabled = false
+	end
+
+	
+	
+	if (dialog.Left.Visible == false and dialog.Right.Visible == false) or dialog.CanMove.Value == true then
+		--print("no dialog visible")
+		if iscrouching == true then
+			if humanoid:GetState() ~= Enum.HumanoidStateType.Swimming then
+				if math.abs(humanoidRootPart.Velocity.Y) <= 2 then
+					crouch:Play()
+					humanoid.WalkSpeed = walkspeed/1.6
+				else
+					humanoid.WalkSpeed = walkspeed
+				end
+			end
+		elseif crouch.IsPlaying then
+			crouch:Stop()
+			if issliding == false and isljumping == false and isdiving == false then
+				humanoid.WalkSpeed = walkspeed
+			end
+		end
+		
+		if isflipping == true and flipcheck == true then
+			if humanoid:GetState() == Enum.HumanoidStateType.Swimming or humanoid:GetState() == Enum.HumanoidStateType.Running or humanoid:GetState() == Enum.HumanoidStateType.RunningNoPhysics then
+				humanoid.JumpPower = jumppower
+				isflipping = false
+				flipcheck = false
+				humanoid.WalkSpeed = walkspeed
+			else
+				humanoid.WalkSpeed = walkspeed/1.5
+			end
+		end
+	
+		if canrun == true then
+			humanoid.WalkSpeed = walkspeed * landboost
+			runcount = runcount + 1
+			smoke.particles1.Rate = 14
+			if runcount > 60 then
+				runcount = 0
+				canrun = false
+				humanoid.WalkSpeed = walkspeed
+				smoke.particles1.Rate = 7
+			end
+		end
+	
+		if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall
+		and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping
+		and canrun == false
+		and isdiving == false
+		and isljumping == false
+		and iscrouching == false
+		and issliding == false then
+			humanoid.WalkSpeed = walkspeed
+		end
+	
+	elseif (dialog.Left.Visible == true or dialog.Right.Visible == true) and dialog.CanMove.Value == false then
+		--print("dialog visible")
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoidRootPart.Velocity = humanoidRootPart.Velocity * Vector3.new(0, 1, 0)
+	end
+	
+	settings.RotationType = 0
+	
+	
+	if humanoid:GetState() == Enum.HumanoidStateType.Landed then 
+		humanoidRootPart.Velocity = humanoidRootPart.Velocity * Vector3.new(1, 0, 1)
+		
+		if humanoid.Health > 0 and smoke.particles3.Enabled == false then
+			smoke.particles3.Enabled = true
+			smoketick = 3
+		end
+	elseif humanoid.Health > 0 and smoke.particles3.Enabled == true and smoketick <= 0 then
+		smoke.particles3.Enabled = false
+	end
+	
+	if smoketick > 0 then
+		smoketick = smoketick - 1
+	end
+	
+	
+	
+	
+end)
