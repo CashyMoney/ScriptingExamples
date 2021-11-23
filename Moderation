@@ -1,0 +1,142 @@
+--[[
+	desc: Server-sided moderation system for banning,kicking, and checking bans
+]]
+local DSS = game:GetService("DataStoreService")
+local banStorage = game.DataStoreService:GetDataStore("BanStorage12")
+local Group1ID = 52439
+local Group2ID = 732471
+local Players = game:GetService("Players")
+
+--Retrieves the current data/time
+local date = os.date("*t")
+local YearDay = date.yday
+local CurrentYear = date.year
+local currentHour = date.hour
+
+--The webhook the data is being sent to
+local url = "https://discord.com/api/webhooks/774369700770742312/re8Yl4UlWG_56TZmBe7lJIcnHqcRqzDhZViep1pEg9KHnutd3E1qsWi7ecM"
+local https = game:GetService("HttpService")
+
+
+
+game.Players.PlayerAdded:Connect(function(player)
+	--Checks to make sure that the player is in the groups and has the correct rank
+	if player:IsInGroup(Group1ID) or player:IsInGroup(Group2ID)  then
+		if player:GetRankInGroup(Group1ID) == 253 or player:GetRankInGroup(Group1ID) == 254 or player:GetRankInGroup(Group1ID) == 255 or player:GetRankInGroup(Group2ID) == 254 or player:GetRankInGroup(Group2ID) == 9 or player:GetRankInGroup(Group2ID) == 5 then
+			--Admin panel ui is given to player from the server
+			print(player.Name.."has been given admin!")
+			local clone = script.AdminPanel:Clone()
+			clone.Parent = player.PlayerGui
+		end
+	end
+	
+	--The ban data for that player is here
+	local previousData = banStorage:GetAsync(player.UserId)
+	
+	
+	if previousData == nil then --New Player
+		local data = {banned = false, hour = 0, day = 0, year = 0, reason = ""}
+		banStorage:SetAsync(player.UserId, data)
+	else
+		if previousData.banned == true and ((previousData.day == YearDay and currentHour <= previousData.hour and previousData.year <= CurrentYear) or (previousData.day > YearDay  and previousData.year <= CurrentYear) ) then
+			-- Ban Hammer Time, the player is still banned
+			local daysRemaining = previousData.day - YearDay
+			player:Kick("You have been banned for "..previousData.reason.."! Time remaining: "..daysRemaining.." days")
+		else
+			--They're no longer banned
+			previousData.banned = false
+		end
+	end
+end)
+
+--An admin has decided to ban someone 
+game.ReplicatedStorage.Remotes.Ban.OnServerEvent:Connect(function(player, victim, days, daReason)
+	--[[
+		:param victim: the player being banned
+		:param days: the number of days the player is being banned for
+		:param daReason: the reason for why the player is being banned
+	]]
+	local victimId =  game.Players:GetUserIdFromNameAsync(victim)
+	
+	--Checks to make sure the player isn't in the group
+	if player:IsInGroup(Group1ID) or player:IsInGroup(Group2ID) then
+			if player:GetRankInGroup(Group1ID) == 253 or player:GetRankInGroup(Group1ID) == 254 or player:GetRankInGroup(Group1ID) == 255 or player:GetRankInGroup(Group2ID) == 254 or player:GetRankInGroup(Group2ID) == 9 or player:GetRankInGroup(Group2ID) == 5 then
+			
+			--The discord data being sent to the webhook
+			local dizzyData = {
+				['embeds'] = {{
+					['title'] = "**Player Banned 🔨**",
+					['description'] = victim.." has been banned by "..player.Name.." for "..daReason.."! Time Remaining: "..days.." days!",
+					['color'] = 10439,
+					['url']= "https://www.roblox.com/users/"..game.Players:GetUserIdFromNameAsync(victim).."/profile"--player user
+				}}
+			}
+			
+			--Posting the data
+			local finalData = https:JSONEncode(dizzyData)
+			https:PostAsync(url,finalData)
+			
+			--Making sure that the player is banned correctly
+			if YearDay + days <=365 then
+				local data = {banned = true, hour = currentHour, day = YearDay + days, year = CurrentYear, reason = daReason}	
+				
+				banStorage:SetAsync(victimId, data)
+			else
+				local data = {banned = true, hour = currentHour, day = (YearDay + days)-365,year = CurrentYear + 1, reason = daReason}
+				banStorage:SetAsync(victimId, data)
+			end
+				local found = game.Players:FindFirstChild(victim)
+			if found then
+				found:Kick("You have been banned for "..daReason.."! Time remaining: "..days.." days")
+			end
+		end
+	end
+end)
+
+--Checks the player's ban info
+game.ReplicatedStorage.Remotes.CheckBan.OnServerEvent:Connect(function(admin,daPlayer)
+	--[[
+		:param admin: the admin that checked the data
+		:param daPlayer: the player that is being banned
+	]]
+	local id = game.Players:GetUserIdFromNameAsync(daPlayer)
+	local previousData = banStorage:GetAsync(id)
+	if previousData then
+		game.ReplicatedStorage.Remotes.SendBanData:FireClient(admin,previousData.banned,daPlayer)
+	else
+		game.ReplicatedStorage.Remotes.SendBanData:FireClient(admin,false,daPlayer)
+	end
+end)
+
+--Kicks the player from the server
+game.ReplicatedStorage.Remotes.Kick.OnServerEvent:Connect(function(player, victim, daReason)
+	--[[
+		:param victim: the player being banned
+		:param daReason: the reason for why the player is being banned
+	]]
+	if player:IsInGroup(Group1ID) or player:IsInGroup(Group2ID) then
+		if player:GetRankInGroup(Group1ID) == 253 or player:GetRankInGroup(Group1ID) == 254 or player:GetRankInGroup(Group1ID) == 255 or player:GetRankInGroup(Group2ID) == 254 or player:GetRankInGroup(Group2ID) == 9 or player:GetRankInGroup(Group2ID) == 5 then
+			local found = game.Players:FindFirstChild(victim)
+			if found then
+				
+				--The discord data being sent to the webhook
+				local dizzyData = {
+					['embeds'] = {{
+						['title'] = "**Player Kicked 🦶**",
+						['description'] = victim.." has been kicked by "..player.Name.." for "..daReason.."!",
+						['color'] = 10434,
+						['url']= "https://www.roblox.com/users/"..game.Players:GetUserIdFromNameAsync(victim).."/profile"--player user
+					}}
+				}
+				
+				--Sends the final data and kicks the player
+				local finalData = https:JSONEncode(dizzyData)
+				https:PostAsync(url,finalData)
+				found:Kick("You have been kicked for "..daReason.."!")
+			end
+		end
+	end
+end)
+
+
+
