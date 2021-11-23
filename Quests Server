@@ -1,0 +1,238 @@
+--[[
+	desc: Either loads a player's quests or gives them a new quest
+]]
+
+local PLAYRES = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local DSS = game:GetService("DataStoreService")
+local HTTPS = game:GetService("HttpService")
+
+local DATASTORE_NAME = "QuestData" -- Changing this will wipe everyone's ongoing quest data.
+local EVENTS = RS["Events"] -- The remote-events folder
+local dataM = require(game.ServerScriptService:WaitForChild("ModuleScripts"):WaitForChild("DataModule"))
+
+local data = {};
+
+--Quests data
+local quests = {
+	{ "Double Jump 10x", 0, 		10,			5,			0 },
+	{ "Double Jump 50x", 0, 		50,			0,			750 },
+	{ "Punch 250x", 	 0, 		250,		20,			1000 },
+	{ "Punch 1000x",	 0, 		1000,		100,		2000 },
+	{ "Hit Player 5x",	 0, 		5,			0,			1250 },
+	{ "Hit Player 25x",	 0, 		25,			0,			3500 },
+	{ "Hit Boss 5x",	 0, 		5,			0,			250 },
+	{ "Hit Boss 25x",	 0, 		25,			0,			1500 },
+	{ "Open Egg 1x",	 0, 		1,			1000,		1000 },
+	{ "Open Egg 25x",	 0, 		25,			15_000,		15_000 },
+};
+
+--
+--Load s the players data
+function loadData(Player)
+	createRandomQuests(Player)
+end
+
+--Saves  the player's data
+function saveData(Player)
+	local getData = getStoredData(Player)
+	if getData ~= nil then
+		local Encoded = HTTPS:JSONEncode(getData)
+		local Datastore = DSS:GetDataStore(DATASTORE_NAME)
+		--
+		local tries = 0
+		local done = false
+		--
+		repeat
+			local suc,err pcall(function()
+				Datastore:SetAsync(Player.UserId, Encoded)
+			end)
+			--There was an error saving
+			if err then
+				warn(err)
+				tries = tries + 1
+				wait(.1)
+			else
+				done = true
+			end
+		until
+		done == true or tries >= 3
+	end
+end
+
+--Resets the data
+function resetData(Player)
+	data[Player.Name] = nil
+end
+
+--Sets the data and updates client
+function setData(Player, Data)
+	if typeof(Data) == "table" then
+		data[Player.Name] = Data
+		updateClientOnQuestData(Player, Data)
+	end
+end
+
+--Checks to see if the player is currently doing a quest
+function isPlayerDoingQuest(Player, questName)
+	if data[Player.Name] ~= nil then
+		if data[Player.Name][1] == questName then
+			return true
+		end
+	end
+	return false
+end
+
+--Gets the stored data on the player's quest data
+function getStoredData(Player)
+	if data[Player.Name] then
+		return data[Player.Name]
+	end
+	return nil
+end
+
+--Returns the player's quest data
+function getOnGoingQuest(Player)
+	if data[Player.Name] == nil then
+		return nil
+	else
+		return data[Player.Name]
+	end
+end
+
+--When the player finally finished their quest
+function finishedQuest(Player)
+	local plrData = data[Player.Name]
+	if plrData ~= nil then
+		local currentValue = plrData[2]
+		local endValue = plrData[3]
+		--
+		if currentValue >= endValue then
+			return true
+		end
+	end
+	return false
+end
+
+--Checks for the id in the quest name
+function returnIdFromQuestName(givenQuestName)
+	for i,v in pairs(quests) do
+		if v[1] == givenQuestName then
+			return i
+		end
+	end
+	return nil
+end
+
+--Checks to see if they arleady have the quest running
+function isAlreadyInArray(givenArray, givenQuestData)
+	local newQuestId = returnIdFromQuestName(givenQuestData[1])
+	for i,v in pairs(givenArray) do
+		local alreadyQuestId = returnIdFromQuestName(v[1])
+		if alreadyQuestId == newQuestId then
+			return true
+		end
+	end
+	return false
+end
+
+--
+--Creates a random queset from the available ones above
+function createRandomQuests(Player)
+	data[Player.Name] = nil
+	--
+	local randomQuests = {}
+	--
+	while #randomQuests < 4 do
+		local randomQuestId = math.random(1, #quests)
+		local questData = quests[randomQuestId]
+		if isAlreadyInArray(randomQuests, questData) == false then
+			table.insert(randomQuests, questData)
+		end
+	end
+	--
+	updateClientOnQuestData(Player, randomQuests)
+end
+
+--Updates the client so they're seeing the correct quest
+function updateClientOnQuestData(Player, Data)
+	local findEvent = EVENTS:FindFirstChild("QuestUpdate")
+	if findEvent then
+		if Data ~= nil and typeof(Data) == "table" then
+			findEvent:FireClient(Player, Data)
+		end
+	else
+		warn("QuestUpdate event is missing.")
+	end
+end
+
+--Whenever their is a request, mainly when the the values change
+function requestQuestUpdate(Player)
+	if getStoredData(Player) ~= nil then
+		updateClientOnQuestData(Player, getStoredData(Player))
+	else
+		createRandomQuests(Player)
+	end
+end
+
+--The player has finished their quest and are now rewarded, updates player data
+function playerFinishedQuest(Player, questName, skip)
+	if getStoredData(Player) ~= nil then
+		if finishedQuest(Player) == true or skip == "skip" then
+			local Gems = data[Player.Name][4]
+			local Coins = data[Player.Name][5]
+			--
+			rewardPlayer(Player, Coins, Gems)
+			--
+			createRandomQuests(Player)
+		end
+	elseif questName ~= nil and questName ~= "" then
+		setData(Player, quests[returnIdFromQuestName(questName)])
+	end
+end
+
+--The reward system for completing quests
+function rewardPlayer(Player, coinsGive, gemsGive)
+	dataM.update(Player,{Coins = coinsGive, Gems = gemsGive},"Add")
+end
+
+--Gets the player's stored data from their quest
+function checkUpdate(Player, questName)
+	if isPlayerDoingQuest(Player, questName) == true then
+		local newData = getStoredData(Player)
+		newData[2] = newData[2] + 1
+		--
+		setData(Player, newData)
+	end
+end
+
+--Checks the status of the player's quest
+function receiveUpdate(Player, Action)
+	for i,v in pairs(quests) do
+		if string.match(v[1], Action) then
+			checkUpdate(Player, v[1])
+		end
+	end
+end
+
+--Ability for people to skip a quest, bu buying ofcourse
+function skipQuest(Player)
+	playerFinishedQuest(Player, getStoredData(Player), "id")
+end
+
+--
+--When the player has a double jump quest
+function doubleJumpEvent(Player)
+	receiveUpdate(Player, "Double Jump")
+end
+
+
+--The main
+
+PLAYRES.PlayerAdded:Connect(loadData)
+PLAYRES.PlayerRemoving:Connect(saveData)
+EVENTS["ClaimQuest"].OnServerEvent:Connect(playerFinishedQuest)
+EVENTS["QuestUpdate"].OnServerEvent:Connect(requestQuestUpdate)
+EVENTS["DoubleJump"].OnServerEvent:Connect(doubleJumpEvent)
+script["questUpdate"].Event:Connect(receiveUpdate)
+script["skipQuest"].Event:Connect(skipQuest)
