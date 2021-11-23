@@ -1,6 +1,6 @@
 --[[
 	desc: Handles initialzing the players data by retrieving their data file or making a new one.
-	It then sends the data to the dataModule
+	It then sends the data to the dataModule and handles any remote event which are then used to update the data module.
 ]]
 
 local dataStoreService = game:GetService("DataStoreService")
