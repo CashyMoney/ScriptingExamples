@@ -1,0 +1,67 @@
+--[[
+	desc: Renders an object in a vpf and rotates it
+]]
+
+--Gets the viewPortFrame and item that is being rendered
+local vpf = script.Parent.Parent:FindFirstChildOfClass("ViewportFrame")
+local items = workspace:WaitForChild("Items"):FindFirstChild(script.Item.Value)
+local children = items:GetChildren()
+
+local index, event = 1, nil
+
+--Sets up the camera
+local camera = Instance.new("Camera")
+camera.FieldOfView = 1
+vpf.CurrentCamera = camera
+vpf.Visible = true
+
+--Rotation around the model
+local function setRotationEvent(model)
+	--Gets the siz/cframe of the model 
+	local currentAngle = 5
+	local modelCF, modelSize = model:GetBoundingBox()	
+	
+	--Determines the models true size
+	local rotInv = (modelCF - modelCF.p):inverse()
+	modelCF = modelCF * rotInv
+	modelSize = rotInv * modelSize
+	modelSize = Vector3.new(math.abs(modelSize.x), math.abs(modelSize.y), math.abs(modelSize.z))
+	
+	--Gets the diagonal, looking for the largest one
+	local diagonal = 0
+	local maxExtent = math.max(modelSize.x, modelSize.y, modelSize.z)
+	local tan = math.tan(math.rad(camera.FieldOfView/2))
+	
+	--Chooses the diagonal based on whichever is the largest
+	if (maxExtent == modelSize.x) then
+		diagonal = math.sqrt(modelSize.y*modelSize.y + modelSize.z*modelSize.z)/1
+	elseif (maxExtent == modelSize.y) then
+		diagonal = math.sqrt(modelSize.x*modelSize.x + modelSize.z*modelSize.z)/1
+	else
+		diagonal = math.sqrt(modelSize.x*modelSize.x + modelSize.y*modelSize.y)/1
+	end
+	
+	--The closest that the camera can get
+	local minDist = (maxExtent/2)/tan + diagonal
+	
+	--Moves the camera changing it's cframe and angle
+	return game:GetService("RunService").RenderStepped:Connect(function(dt)
+		currentAngle = currentAngle + 1*dt*60
+		camera.CFrame = modelCF * CFrame.fromEulerAnglesYXZ(0, math.rad(currentAngle), 0) * CFrame.new(0, 0, minDist + 3)
+	end)
+end
+
+--Sets up the model to be rendered and rotated around
+local function setIndexActive(newIndex)
+	if (event) then
+		event:Disconnect()
+		children[index]:Clone().Parent = items
+	end
+	
+	index = newIndex
+	event = setRotationEvent(children[index])
+	children[index]:Clone().Parent = vpf
+end
+
+--main
+setIndexActive(index)
