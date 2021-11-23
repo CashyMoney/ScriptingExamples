@@ -1,0 +1,33 @@
+--[[
+	desc: Creates a path for an npc to follow to reach a destination
+]]
+local humanoid = script.Parent
+local endPoint = game.Workspace:WaitForChild("Points").EndPoint
+
+--Sets up pathfinding and computes the path that the npc will need to follow
+local PFS = game:GetService("PathfindingService")
+local path =  PFS:CreatePath()
+path:ComputeAsync(script.Parent.HumanoidRootPart, endPoint)
+
+if path.Status == Enum.PathStatus.Success then --Checks to make sure a path was made
+	local nodes = path:GetWayPoint() --Here are the nodes that will be followed
+	
+	for j,k in pairs(nodes) do
+		--Creates each of the nodes
+		local node = Instance.new("Part", workspace)
+		node.Size = Vector3.new(1,1,1)
+		node.Transparency = 1
+		node.Anchored = true
+		node.CanCollide = false
+		
+		--Allows the npc to jump if their is an obstacle
+		if k.Action == Enum.PathWaypointAction.Jump then
+			humanoid.Jump = true
+		end
+		
+		--Moves the npc to the node and then destroys it, since it's no longer needed
+		humanoid:MoveTo(k.Position)
+		humanoid.MoveToFinished:Wait()
+		k:Destroy()
+	end
+end
