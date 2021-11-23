@@ -1,0 +1,43 @@
+--[[
+	desc: Allows for ball-like movement inside of a hamster-ball
+]]
+
+repeat wait() until script.Parent.DeBall.Middle~=nil and script.Parent.DeBall.boll~=nil
+
+	script.Parent.DeBall.boll.CanCollide=true
+	script.Parent.Humanoid.Sit = true
+
+	--Loop for the player movement inside of the hamster ball
+	while true do
+		if script.Parent == nil then break end
+		if script.Parent.Humanoid.Sit == false then break end
+		if script.Parent.DeBall == nil then break end
+		wait()
+		
+		--Takes the player move direction and applies it to the ball
+		script.Parent.DeBall.Middle.BodyAngularVelocity.AngularVelocity = Vector3.new(script.Parent.Humanoid.MoveDirection.z * 32,0,script.Parent.Humanoid.MoveDirection.x * -32)	
+		script.Parent.DeBall.Middle.BodyAngularVelocity.MaxTorque = Vector3.new(20000,20000,20000)
+	
+		--Looks for if the player is moving
+		if script.Parent.Humanoid.MoveDirection ~= Vector3.new(0,0,0) then
+			--Grabs the move directions from the player
+			local x = script.Parent.DeBall.alien.Position.z+script.Parent.Humanoid.MoveDirection.x
+			local y = script.Parent.DeBall.alien.Position.x-script.Parent.Humanoid.MoveDirection.z	
+			local  z= script.Parent.DeBall.alien.Position.y
+		
+			--Sets up the bodygyro so the ball moves to where the player commands it to move
+			script.Parent.DeBall.alien.BodyGyro.cframe = CFrame.new(script.Parent.DeBall.alien.Position, Vector3.new((x),(y),(z)))
+		else
+			--No keys are being pressed, ball should start to slow down
+			script.Parent.DeBall.Middle.BodyAngularVelocity.AngularVelocity = Vector3.new(0,0,0) --Allows the ball to come to a stop when no key are being pressed
+		end
+	end
+	
+	
+	script.Parent.DeBall.Middle.BodyAngularVelocity.MaxTorque = Vector3.new(0,0,0)
+	
+	
+	script.Parent:BreakJoints()
+	wait(2)
+	script.Disabled = false
+
