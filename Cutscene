@@ -1,0 +1,194 @@
+--[[
+	desc: Creates a cutscene for the client, updating text, moving cameras, and creating titles
+]]
+
+local cutsceneModule = {}
+
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = game.Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local modules = ReplicatedStorage:WaitForChild("Modules")
+
+-- Require audio module
+local AudioPlayer = require(modules:WaitForChild("Audio"))
+
+local sceneGui = player.PlayerGui:WaitForChild("CutsceneGui")
+local AllGui = player.PlayerGui:GetChildren()
+
+-------------------------------------
+
+--Sets up the cutscene
+function cutsceneModule.setup()
+	--gameGui.Enabled = false
+	
+	for i = 1,#AllGui do
+		if AllGui[i]:IsA("ScreenGui") then
+			AllGui[i].Enabled = false
+		end
+	end
+	sceneGui.Enabled = true --Enables the cinematic view
+	
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.FieldOfView = 60 --Limits visibility
+end
+
+--Setsup characters being used in the cutscene
+function cutsceneModule.setupCharacter()
+	local character = player.Character
+	if character then
+		--Clones/setup the player's character 
+		local avatar = character:Clone()
+		avatar.Name = "Avatar"
+		avatar.Humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		avatar.Parent = workspace
+		return avatar
+	else
+		return nil
+	end
+end
+
+--Positions any characters that are in the cut scene
+function cutsceneModule.positionRig(rig, target)
+	--[[
+		:param rig: the rig that is being moved
+		:param target: the cframe of where the target is being moved
+	]]
+	
+	rig.Parent = workspace
+	rig.PrimaryPart.CFrame = target
+	cutsceneModule.animateRig(rig, "idle")
+end
+
+--Animates the righ of the character
+function cutsceneModule.animateRig(rig, animName)
+	--[[
+		:param rig: the rig that is being animated
+		:param animName: name of the animation that is being run
+	]]
+	
+	local animation = rig.Animate:FindFirstChild(animName)
+	if animation then
+		local animTrack = animation:GetChildren()[1]
+		local animator = rig.Humanoid:LoadAnimation(animTrack)
+		animator:Play()
+		return animator
+	end
+end
+
+--Moves the rig
+function cutsceneModule.moveRig(rig, target)
+	--[[
+		:param rig: the rig that is being moved
+		:param target: position that the rig is waling towards
+	]]
+	
+	local walkAnim = cutsceneModule.animateRig(rig, "walk") --Walking animation
+	rig.Humanoid:MoveTo(target.Position) --Moves to the target
+	
+	spawn(function()
+		--The rig has reached it's target
+		rig.Humanoid.MoveToFinished:Wait()
+		if rig and rig:FindFirstChild("Humanoid") then
+			walkAnim:Stop()
+			cutsceneModule.animateRig(rig, "idle")
+		end
+		
+	end)
+end
+
+--Positions the camera for the target
+function cutsceneModule.positionCamera(target)
+	camera.CFrame = target
+end
+
+--Tweens the camera
+function cutsceneModule.moveCamera(target, tweenTime)
+	--[[
+		:param target: location the camera is moving to
+		:param tweenTime: how long it will take to get there
+	]]
+	local tween = TweenService:Create(camera, TweenInfo.new(tweenTime), {CFrame = target})
+	tween:Play()
+	tween.Completed:Wait()
+end
+
+--Updates the text that the client is seeing
+function cutsceneModule.setText(label, msg, color)
+	--[[
+		:param label: the tectlabel being updated
+		:param msg: the message being updated onto the label
+		:param color: the color of the text
+	]]
+	sceneGui.Text[label].Text = msg
+	
+	if color then
+		sceneGui.Text:FindFirstChild(label).TextColor3 = color
+	end
+end
+
+--Gives the text a type-writer effect
+function cutsceneModule.typeText(label, msg, typeTime, color)
+	--[[
+		:param label: the label being updated
+		:param msg: the message being put on the label
+		:param typeTime: how long the typ-writer effect lasts
+		:param color: the color of the text
+	]]
+	if color then
+		sceneGui.Text:FindFirstChild(label).TextColor3 = color
+	end
+	
+	for i=1, #msg do
+		sceneGui.Text[label].Text = string.sub(msg, 1, i)
+		wait(typeTime / #msg)
+	end
+end
+
+--Resets teh cutscene gui, since it ended
+function cutsceneModule.resetTo(state)
+
+	for i = 1,#AllGui do
+		if AllGui[i]:IsA("ScreenGui") then
+			AllGui[i].Enabled = true
+		end
+	end
+	sceneGui.Enabled = false
+
+	--Resets the textlabel
+	for index, label in pairs(sceneGui.Text:GetChildren()) do
+		label.Text = ""
+		label.TextColor3 = Color3.fromRGB(255,255,255)
+	end
+	
+	--Gets rid of the things that were created during the cutscene
+	if workspace:FindFirstChild("Avatar") then
+		workspace:FindFirstChild("Avatar"):Destroy()
+	end
+	
+	if workspace:FindFirstChild("Scene") then
+		workspace:FindFirstChild("Scene"):Destroy()
+	end
+	
+	--Sends the player back to itself, since the game is starting
+	if state == "Player" then
+		camera.CameraType = Enum.CameraType.Custom
+		
+		-- Explicitly state the camera subject in case the player has reset during the cutscene
+		local character = player.Character or player.CharacterAdded:Wait()
+		local humanoid = character:WaitForChild("Humanoid")
+		camera.CameraSubject = humanoid
+		
+	--The player is sent back the main menu		
+	elseif state == "Menu" then
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = workspace.MenuArea.MenuCam1.CFrame
+		AudioPlayer.playAudio("Lobby")
+	end
+	
+	local events = game.ReplicatedStorage:WaitForChild("Events")
+	events:WaitForChild("cutsceneFinished"):FireServer()
+end
+
+return cutsceneModule
