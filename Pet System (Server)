@@ -1,0 +1,285 @@
+--[[
+	desc: A pet system that allows pets to be follow the player and even creates boosts for the player
+]]
+
+local rep = game.ReplicatedStorage
+local events = rep:WaitForChild("Events")
+local ss = game.ServerStorage
+local noFormat = require(rep.ModuleScripts:WaitForChild("PetData"))
+local pets,eggs = noFormat["pets"],noFormat["eggs"]
+local dataM = require(game.ServerScriptService:WaitForChild("ModuleScripts"):WaitForChild("DataModule"))
+local dataStore = game:GetService("DataStoreService"):GetDataStore("Data2")
+
+local ownership = require(rep:WaitForChild("ModuleScripts"):WaitForChild("GamePassesOwnership"))
+local fullCircle = 2 * math.pi
+
+--Gets the x and z positions for the pets
+local function getXAndZPositions(angle)
+	local x = math.cos(angle) * 8.5
+	local z = math.sin(angle) * 8.5
+	return x, z
+end
+
+--Formats the pets, no matter the amount of them
+local function formatPets(char)
+	for i,child in pairs(char:WaitForChild("HumanoidRootPart"):GetChildren()) do
+		if child:IsA("Attachment") and child:FindFirstChild("Pet") then child:Destroy() end
+ 	end
+	
+	--Sets up each pet that they player has equipped
+	for i,pet in pairs(rep.Pets[char.Name]:GetChildren()) do
+		--The angle and position of the pets
+		local angle = i * (fullCircle / #rep.Pets[char.Name]:GetChildren())
+		local x, z = getXAndZPositions(angle)
+		
+		--Makes an attatchment allowing for the pets to be animated
+		local at1 = Instance.new("Attachment")
+		at1.Position = Vector3.new(x,-pets[pet.Name]["elevation"],z)
+		at1.Name = "PetAttachment"..i
+		at1.Parent = char:WaitForChild("HumanoidRootPart")
+		
+		local v = Instance.new("IntValue")
+		v.Name = "Pet"
+		v.Parent = at1
+		
+		--Moves the pet to it's appropiate start position
+		pet:MoveTo(at1.WorldPosition)
+		
+		--Whether the pet is being used or not
+		local val = Instance.new("StringValue")
+		val.Name = "Use"
+		val.Value = at1.Name
+		val.Parent = pet
+	end
+end
+
+--This is used for equipping a pet or all of them
+local function equip(pet,key,plr)
+	--[[
+	:param pet: the pet being equipped
+	:param key: the name of the key
+	:param plr: the owner of the pets
+	]]
+	
+	--Creates the new pet
+	local newPet = pet:Clone()
+	newPet.Name = key
+	pet.HumanoidRootPart.Transparency = 1
+	
+	if pet.HumanoidRootPart:FindFirstChild("Torso") then
+		pet.HumanoidRootPart.Torso:Destroy()
+	end
+	
+	if pet.HumanoidRootPart:FindFirstChild("Weld") then
+		pet.HumanoidRootPart.Weld:Destroy()
+	end
+--	weld(newPet)
+	
+	local at0 = Instance.new("Attachment")
+	at0.Parent = newPet.PrimaryPart
+	
+	local m6d = Instance.new("Motor6D")
+	m6d.Name = "Torso"
+	m6d.Part0 = pet.HumanoidRootPart
+	m6d.Part1 = pet.Torso
+	m6d.Parent = pet.HumanoidRootPart
+	
+	newPet.Parent = rep.Pets[plr.Name]
+	
+	if plr.Character then
+		formatPets(plr.Character)
+	end
+end
+
+--Sets up a folder for the pet data in replicated storage
+game.Players.PlayerAdded:Connect(function(plr)
+	plr.CharacterAdded:Connect(function(char)
+		formatPets(char)
+	end)
+	
+	local folder = Instance.new("Folder")
+	folder.Name = plr.Name
+	folder.Parent = rep.Pets
+	
+	plr:WaitForChild("leaderstats")
+	
+	wait(3)
+	
+	local data = dataM.get(plr,"PetsEquip")
+		
+	for key,amnt in pairs(data) do
+		for i = 1,amnt do
+			equip(pets[key]["location"],key,plr)
+		end
+	end
+	
+	giveEventPet(plr)
+end)
+
+
+--When the pet player needs to be given a pet
+function giveEventPet(plr)
+	local pet = "OP Pet"
+	local info = pets[pet]
+	local inv = dataM.get(plr,"Pets")
+	
+	--Gives a player a pet if they're in the group
+	if plr:IsInGroup(523967) then
+		if inv[pet] == nil or inv[pet] <= 0 then
+			dataM.update(plr,{["Pets"] = pet},1)
+			inv[pet] = 1
+			game:GetService("ReplicatedStorage")["Events"]["FreePetEventGui"]:FireClient(plr, 0)
+		end
+	else
+		if inv[pet] > 0 then
+			dataM.update(plr,{["Pets"] = pet},-1)
+			inv[pet] = 0
+		end
+		game:GetService("ReplicatedStorage")["Events"]["FreePetEventGui"]:FireClient(plr, 1)
+	end
+end
+
+--When the client wants to equip a pet
+events:WaitForChild("PetEquip").OnServerEvent:Connect(function(plr,pet)
+	local info = pets[pet]
+	local inv = dataM.get(plr,"Pets")
+	local curEquip = dataM.get(plr,"PetsEquip")
+	
+	--Updates the pets info server-side and makes it look equipped for the client
+	if inv[pet] and (curEquip[pet] == nil or inv[pet] > curEquip[pet]) then
+		equip(info["location"],pet,plr)
+		dataM.update(plr,{["PetsEquip"] = pet},1)
+		events.PetUpdate:FireClient(plr)
+	end
+end)
+
+--When the player is unequipped
+events:WaitForChild("PetUnequip").OnServerEvent:Connect(function(plr,pet)
+	--[[
+		:param pet: the pet that the player is unequipping
+	]]
+	
+	--Gets all of the player's information
+	local info = pets[pet]
+	local inv = dataM.get(plr,"Pets")
+	local curEquip = dataM.get(plr,"PetsEquip")
+	
+	--IF the number of pets in the inventory is greater than 0
+	if inv[pet] > 0 then
+		if rep.Pets[plr.Name]:FindFirstChild(pet) then
+			rep.Pets[plr.Name][pet]:Destroy()
+		end
+		
+		--Formats the pets and updates the player's data
+		dataM.update(plr,{["PetsEquip"] = pet},-1)
+		
+		formatPets(plr.Character)
+		
+		events.PetUpdate:FireClient(plr)
+	end
+end)
+
+--For when the player opens an egg
+events:WaitForChild("PetEggOpen").OnServerEvent:Connect(function(plr,egg)
+	--[[
+		:param egg: the name of the egg that the player is opening
+	]]
+	
+	--Gets the pets info
+	local info = eggs[egg] 
+	local currency = dataM.get(plr,info["stats"]["currency"])
+	
+	local pets = dataM.get(plr,"Pets")
+	local found
+	
+	--Rolls for a new pet
+	local function roll()
+		local rand = math.random(0,1000)/10
+			
+		for key,chance in pairs(info["chances"]) do
+			if rand >= chance.X and rand <= chance.Y and found == nil then
+				found = key
+			end
+		end
+	end
+	
+	--Adds the pet and takes the money 
+	if pets and #pets < 50 then
+		if currency >= info["stats"]["price"] then
+			dataM.update(plr,{[info["stats"]["currency"]] = -info["stats"]["price"]},"Add")
+			
+			roll()
+			
+			if found == nil then
+				repeat
+					roll()
+				until found ~= nil
+			end
+			
+			if plr.Gamepasses:FindFirstChild("9664581") and (eggs[egg]["chances"][found].Y - eggs[egg]["chances"][found].X) > 10 then
+				roll()
+			end
+			
+			events.PetEggOpen:FireClient(plr,found)
+			game:GetService("ServerScriptService")["MainCode"]["Quests"]["questUpdate"]:Fire(plr, "Open Egg")
+			dataM.update(plr,{["Pets"] = found},1)
+			dataM.update(plr,{["TotalEggsHatched"] = 1},"Add")
+			
+			
+		end
+	end
+end)
+
+--The client wishses to delete the egg
+events:WaitForChild("PetDelete").OnServerEvent:Connect(function(plr,pet)
+	--[[
+		:param pet: the name of the pet being deleted
+	]]
+	local inv = dataM.get(plr,"Pets")
+	local curEquip = dataM.get(plr,"PetsEquip")
+	
+	--Makes sure the pet isn't already equipped
+	if inv[pet] ~= curEquip[pet] then
+		dataM.update(plr,{["Pets"] = pet},-1)
+		
+		events.PetUpdate:FireClient(plr)
+	else
+		events.Alert:FireClient(plr,"Make sure to unequip a pet before deleting it!")
+	end
+end)
+
+--The client wants to craft a shiny pet
+events:WaitForChild("PetCraft").OnServerEvent:Connect(function(plr,pet)
+	--[[
+		:param pet: the name of the pet being upgraded to shiny
+	]]
+	
+	local inv = dataM.get(plr,"Pets")
+	local curEquip = dataM.get(plr,"PetsEquip")
+	
+	--Makes sure that the player is able to craft a shiny
+	if inv[pet] >= 10 and (not curEquip[pet] or (inv[pet] -curEquip[pet]) >= 10) then
+		--Updates the player's data after using the 10 pets
+		inv[pet] = inv[pet] - 10
+		dataM.update(plr,{["TotalPetsCrafted"] = 1},"Add")
+
+		if inv[pet.." Shiny"] then
+			inv[pet.." Shiny"] = inv[pet.." Shiny"] +1
+		else
+			inv[pet.." Shiny"] = 1
+		end
+		
+		events.Alert:FireClient(plr,"Congratulations! You crafted a shiny "..pet.. " pet!")
+		events.PetUpdate:FireClient(plr)
+	--Alerts the player if they're unable to craft a shiny of that pet
+ 	elseif inv[pet] < 10 then
+		events.Alert:FireClient(plr,"You need 10 "..pet.. " pets to do this!")
+	elseif (inv[pet] -curEquip[pet]) < 10 then
+		events.Alert:FireClient(plr,"All 10 "..pet.. " pets must not be equipped!")
+	end
+end)
+
+game.Players.PlayerRemoving:Connect(function(plr)
+	rep.Pets[plr.Name]:Destroy()
+end)
+
