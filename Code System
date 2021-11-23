@@ -1,0 +1,38 @@
+--[[
+	desc: Takes in codes and gives the appropiate awards, showcases utilizing mutliple systems in one,
+	like pets can be given through codes in addition to coins/gems
+]]
+
+local rep = game.ReplicatedStorage
+local codes = require(rep:WaitForChild("ModuleScripts"):WaitForChild("CodeData"))
+local dataM = require(game.ServerScriptService:WaitForChild("ModuleScripts"):WaitForChild("DataModule"))
+local events = game.ReplicatedStorage:WaitForChild("Events")
+
+--Checks to make sure that the code from the client is acceptable and gives a reward
+events:WaitForChild("CodeCheck").OnServerEvent:Connect(function(plr,reqCode)
+	--[[
+		:param reqCode: The code that the player has entered
+	]]
+	
+	--Makes sure the case is the same, case-sensitive
+	local formatCode = string.lower(reqCode)
+
+	if codes[formatCode] then
+		local codeInv = dataM.get(plr,"Codes")
+		
+		--This means the player has not already used the code
+		if codeInv[formatCode] == nil then
+			if codes[formatCode]["coins"] then --Gives coins/gems
+				dataM.update(plr,{["Coins"] = codes[formatCode]["coins"],["Gems"] = codes[formatCode]["gems"],["Codes"] = formatCode},"Add")
+			elseif codes[formatCode]["pet"] then --Gives a pet
+				dataM.update(plr,{["Pets"] = codes[formatCode]["pet"],["Codes"] = formatCode},1)
+			end
+			events.Alert:FireClient(plr,"'"..reqCode.. "' has been redeemed!")
+		--The code has already been redeemed
+		elseif codeInv[formatCode] then
+			events.Alert:FireClient(plr,"'"..reqCode.. "' has already been redeemed!")
+		end
+	else
+		events.Alert:FireClient(plr,"'"..reqCode.. "' is invalid!")
+	end
+end)
