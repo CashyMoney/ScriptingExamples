@@ -1,0 +1,59 @@
+--[[
+	desc: watches values in the player's leaderstats and makes ui pop-up if it changes
+]]
+
+local event = game.ReplicatedStorage:WaitForChild("Events"):WaitForChild("ShowGiven") --Remote event
+local abrv = require(game.ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("NumberShorten")) --Module for number formatting
+local tweenService = game:GetService("TweenService")
+local ti = TweenInfo.new(.5,Enum.EasingStyle.Quad,Enum.EasingDirection.InOut) --tween 1
+local ti2 = TweenInfo.new(1,Enum.EasingStyle.Back,Enum.EasingDirection.Out) --tween 2
+local plr = game.Players.LocalPlayer
+
+
+--The values being watched for in the player's leaderstats
+local function watchVal(val)
+	local curVal = val.Value
+	
+	--Updates when a value is changed
+	val.Changed:Connect(function()
+		local amnt = val.Value -curVal
+		
+		--Makes sure the value is a positive value
+		if amnt > 0 then
+			curVal = val.Value
+			
+			--Clones the template for the UI
+			local new = script.Base:Clone()
+			new.TextLabel.Text = "+"..abrv.abrv(amnt)
+			
+			--Grabs the correct decal
+			if val.Name == "Kills" then
+				new.Image = "rbxassetid://5167569820"
+			elseif val.Name == "Gems" then
+				new.Image = "rbxassetid://5167569695"
+			elseif val.Name == "Coins" then
+				new.Image = "rbxassetid://5167569626"
+			end
+			
+			--The position of the ui
+			new.Position = UDim2.new(math.random(100,700)/1000,0,1.25,0)
+			new.Parent = script.Parent
+			
+			--Tween applied to the ui
+			tweenService:Create(new,ti2,{ImageTransparency = 0, Position = new.Position -UDim2.new(0,0,math.random(600,1300)/1000,0), Size = UDim2.new(.05,0,.05,0), Rotation = 0}):Play()
+		
+			--Plays the tween here
+			wait(1)
+			tweenService:Create(new,ti,{ImageTransparency = 1, Size = UDim2.new(.075,0,.075,0), Rotation = 10}):Play()
+			tweenService:Create(new.TextLabel,ti,{TextTransparency = 1,TextStrokeTransparency = 1}):Play()
+			wait(.5) new:Destroy()
+		else
+			curVal = val.Value
+		end
+	end)
+end
+
+--The values being watched for here
+watchVal(plr.leaderstats:WaitForChild("Coins"))
+watchVal(plr.leaderstats:WaitForChild("Kills"))
+watchVal(plr.leaderstats:WaitForChild("Gems"))
