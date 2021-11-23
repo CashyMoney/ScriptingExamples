@@ -1,0 +1,180 @@
+--[[
+	desc: Holds the data for each of the player's allowing it to be easily updated (server-side) only
+  This needs the data server script in order to work, since the other script sends the data here and handles any remote-events
+]]
+
+local inLeaderstats = {["Coins"] = true, ["Gems"] = true, ["Rebirths"] = true} --Displayed in the leaderstats
+local info2 = require(game.ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("IngameItemsSettings"))
+local weaponData,storageData,classData = info2["smacker"],info2["dna"],info2["class"]
+local pets = require(game.ReplicatedStorage.ModuleScripts:WaitForChild("PetData"))["pets"] --Pet data
+local dataStore = game:GetService("DataStoreService"):GetDataStore("Data") --Must be the same as the data script
+
+--------------------------------------------
+local data = {}
+local module = {}
+
+--Adds the players data to the data table
+function module.add(plr,file)
+	--[[
+		:param file: the player's data sent from when they join the game
+	]]
+	
+	data[plr.Name] = file
+	
+	if data[plr.Name].gotNewPetMax == nil and data[plr.Name].MaxEquip ~= nil then
+		data[plr.Name].gotNewPetMax = true
+		data[plr.Name].MaxEquip = data[plr.Name].MaxEquip +1
+	elseif data[plr.Name].gotNewPetMax == nil then
+		data[plr.Name].gotNewPetMax = true
+		data[plr.Name].MaxEquip = 3
+	end
+	
+	--Updates the leaderstats tp include all keys that were specified at the top
+	for key,info in pairs(file) do
+		if inLeaderstats[key] == true then
+			local val = Instance.new("StringValue")
+			val.Value = info
+			val.Name = key
+			val.Parent = plr.leaderstats
+		end
+	end
+end
+
+--Removes the player from the data table
+function module.remove(plr)
+	data[plr.Name] = nil
+end
+
+--Retrieves the player's data
+function module.get(plr,key,all)
+	--[[
+		:param key: the key of the data you're looking for
+		:param all: boolean, do you want all data or specific
+		:return: The value at that key or an error
+	]]
+	
+	
+	if data[plr.Name] then
+		if all == true then
+			return data[plr.Name]  --Returns all of the player data
+		elseif data[plr.Name][key] then
+			return data[plr.Name][key] --Returns the data at a specific key
+		else
+			return 3 --Error
+		end
+	else
+		return 1 --Error
+	end
+end
+
+--Saves the player data
+function module.save(plr)
+	local toSave = data[plr.Name] --Player's data
+	if toSave then
+		local success, response = pcall(function()
+			dataStore:SetAsync(plr.UserId,toSave) 
+		end)
+		
+		--There was an error and the player is still in the server
+		if success == false and plr then
+			game.ReplicatedStorage.Events.Alert:FireClient(plr,"There was an error saving data, trying again soon.")
+			
+			--Tries again after waiting a short period
+			wait(20)
+			module.save(plr)
+		end
+	end
+end
+
+--Updates the player's data 
+function module.update(plr,request,method)
+	--[[
+		:param request: the key/s that are being updated
+		:param method: how the data is bein updated (add/set/etc)
+	]]
+	
+	for key,info in pairs(request) do
+		if data[plr.Name][key] == nil then
+			data[plr.Name][key] = 0  --Gives the key a value if there is none
+		end
+		
+		local petKey --Applied if it boosts the stat
+		local mBy  --Boost
+			
+		if tonumber(info) and (key == "Coins" or key == "Gems") then
+			mBy = 1
+			
+			if key == "Coins" then
+				petKey = "boost"
+				
+				--Group boost, gotta be in the group though
+				if plr:IsInGroup(132345) then
+					mBy = mBy +.2
+				end
+			end
+			
+			--Just adds the pet boosts here
+			if petKey then
+				for pet,amnt in pairs(data[plr.Name]["PetsEquip"]) do
+					for i = 1,amnt do
+						mBy = mBy +pets[pet][petKey] --Adds the pet boosts
+					end
+				end
+			end
+			
+			--Gets the current time
+			local curTime = os.time()
+			
+			--For if the player has an active boost running
+			if (key == "Coins" and data[plr.Name]["CoinBoost"] >= curTime) or (key == "Gems" and data[plr.Name]["GemBoost"] >= curTime) then
+				mBy = mBy +4
+			end
+			
+			--Rebirths applied to gems
+			if key == "Gems" and data[plr.Name]["Rebirths"] ~= 0 then
+				mBy = mBy +data[plr.Name]["Rebirths"] 
+			end
+		end
+		
+		--Applies the boost to the information inputed
+		if mBy and info > 0 then
+			info = math.floor(info *mBy)
+			
+			if data[plr.Name]["Total"..key] then
+				data[plr.Name]["Total"..key] = data[plr.Name]["Total"..key] +info
+			end
+		end
+		
+		--Handling how the data is manipulated
+		--Tables allow multiple data keys to be updated at the same time
+		if typeof(data[plr.Name][key]) == "table" then
+			if typeof(info) ~= "table" then
+				if data[plr.Name][key][info] then
+					data[plr.Name][key][info]  = data[plr.Name][key][info]  +method
+				else
+					data[plr.Name][key][info] = method
+				end
+			else	
+				data[plr.Name][key] = info
+			end
+		--Adds a value to the current value at that key
+		elseif method == "Add" then
+			if (not data[plr.Name][key] or data[plr.Name][key] == 0) and key == "MaxEquip" then
+				data[plr.Name][key] = 2
+			end
+			
+			data[plr.Name][key] = data[plr.Name][key] +info
+			
+		--Sets the key's value to the value entered
+		elseif method == "Set" then
+			data[plr.Name][key] = info
+		end
+		if plr.leaderstats:FindFirstChild(key) then
+			plr.leaderstats[key].Value = data[plr.Name][key]
+		end
+		
+	end
+	
+end
+
+return module
