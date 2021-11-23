@@ -1,0 +1,114 @@
+local MarketplaceService = game:GetService("MarketplaceService")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local dataM = require(game.ServerScriptService.ModuleScripts:WaitForChild("DataModule"))
+
+
+local purchaseHistory = DataStoreService:GetDataStore("PurchaseHistory")
+
+local productFunctions = {}
+
+-- ProductId 1156580096 for Skip Stage:
+productFunctions[1156580096] = function(receipt, player)
+	--[[
+		:param receipt: the receipt that was issued after a product was purchased
+		:param player: the player that made the purchase
+	]]
+	
+	local stage = player.leaderstats.Stage --Current stage that the player is on
+	local maxStages = ReplicatedStorage:WaitForChild("Configuration"):WaitForChild("MaxStages").Value --Finds the max stage
+	
+	if stage.Value < maxStages and stage.Value ~= 0 then
+		
+		dataM.update(player,{Stage = 1},"Add") --Updates the new value
+		
+		if player ~= nil then
+			
+			if player.Character ~= nil then
+				
+				if player.Character:FindFirstChild("Humanoid").Health > 0 then
+					
+					--Moves the person to the new stage
+					player.Character.HumanoidRootPart.CFrame = workspace.CHECKPOINTS:FindFirstChild(stage.Value).CFrame + Vector3.new(0,3,0)
+					
+					return true
+					
+				end
+				
+			end	
+			
+		end
+		
+	end
+
+end
+
+-- ProductId 1161652002 for 50 Robux Donation:
+productFunctions[1161652002] = function(receipt, player)
+	
+	local donationAmount = player:FindFirstChild("DonationAmount")
+	donationAmount.Value = donationAmount.Value + 5000
+	
+	return true --Successful
+end
+
+--Processes a purchase and let's us know if there is some sort of an error
+local function processReceipt(receiptInfo)
+	--[[
+		:param receitInfo: The receipt given from roblox after a dev product is purchased
+	]]
+
+	local playerProductKey = receiptInfo.PlayerId .. "_" .. receiptInfo.PurchaseId
+	local purchased = false
+	
+	--Searches to see if the player has a purchase history
+	local success, errorMessage = pcall(function()
+		purchased = purchaseHistory:GetAsync(playerProductKey) 
+	end)
+	
+	--Purchase was successful
+	if success and purchased then
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	--Purchase Failed
+	elseif not success then
+		error("DataStore error: " .. errorMessage)	
+	end
+	
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	
+	if not player then
+		return Enum.ProductPurchaseDecision.NotProcessedYet  --Still not processed
+	end
+	
+	--Grabs the product Id
+	local handler = productFunctions[receiptInfo.ProductId]
+
+	local success, result = pcall(handler, receiptInfo, player)
+	
+	if not success or not result then
+		
+		warn("An error occurred while proccessing a product purchase.")
+		
+		print("\nProductId:", receiptInfo.ProductId)
+		print("\nPlayer:", player)
+		
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+		
+	end
+	
+	--Updates the player data
+	local success, errorMessage = pcall(function()
+		purchaseHistory:SetAsync(playerProductKey, true)
+	end)
+	
+	--Sends an error message
+	if not success then
+		error("Cannot save purchase data: " .. errorMessage)
+	end
+	
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+	
+end
+
+MarketplaceService.ProcessReceipt = processReceipt
