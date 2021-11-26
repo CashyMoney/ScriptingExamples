@@ -1,0 +1,220 @@
+--[[
+    desc: Designed for an economy simulator type game, made with OOP
+]]
+
+-- Variables
+local citizenHandler = {}
+citizenHandler.__index = citizenHandler
+
+local firstNameArray = { -- First Names
+    "Ben", "Bob", "Simon", "Moe", "Jeff", "Emile", "Theo",    "Danut", "Amo", "Troll", "Fart", "Smelly", "Gru", "Electric", "Joe"
+}
+local lastNameArray = {    -- Last Names
+    "Rite", "Johnathon", "Smith", "Mender", "Gordon", "Lennis", "May", "Biden", "ity", "Minion", "Face", "Joe"
+}
+
+-- Types Of Citizens, basically classes
+citizenHandler.types = { 
+    
+    [1] = { -- Normal Citizen
+        money = 1500,
+        tax = 20, -- Percentage
+        happiness = 100,
+        income = 1000,
+        class = "average",
+    },
+    [2] = { -- Rich citizen
+        money = 2000,
+        tax = 30,
+        happiness = 200,
+        income = 2000,
+        class = "rich",
+    },
+    [3] = { -- Poor citizen
+        money = 1000,
+        tax = 20,
+        happiness = 50,
+        income = 500,
+        class = "poor",
+    }
+    
+}
+
+
+citizenHandler.government = { -- Government
+    money = 0,
+    maintenance = 0
+}
+
+citizenHandler.variableCosts = { -- Costs of living, fines, etc. Values can change, hence "variable costs"
+    costOfLiving = 1000,
+    fines = 750,
+    businessStartup = 2500
+    
+}
+
+citizenHandler.citizens = {}
+
+
+-- Functions
+function CopyTable(tab, shallow) -- Copies a table to a new table
+    
+    shallow = shallow or false
+    if not tab then return false end
+    
+    local newTab = {}
+    
+    for i, v in pairs(tab) do
+        if type(v) == "table" and not shallow then
+            newTab[i] = CopyTable(v)
+            
+        else
+            newTab[i] = v
+            
+        end
+    end
+    
+    return newTab
+    
+end
+
+function GetLengthOfDict(tab) -- Returns the amount of entries in a dictionary (shallow)
+    
+    local length = 0
+    for i, v in pairs(tab) do
+        
+        length += 1
+        
+    end
+    return length
+    
+end
+-- Object Functions
+function citizenHandler.new(typeId: number) -- Creates a new citizen object
+    
+    typeId = typeId or 1
+    local self = setmetatable(CopyTable(citizenHandler.types[typeId]), citizenHandler)
+    
+    self.name = firstNameArray[math.random(1, #firstNameArray)].." "..lastNameArray[math.random(1, #lastNameArray)]
+    self.id = GetLengthOfDict(citizenHandler.citizens) + 1
+    
+    self.illnesses = {}    
+    self.ownsBusiness = false
+    
+    citizenHandler.citizens[self.id] = self
+        
+    return self
+    
+end
+
+function citizenHandler:Pay() -- Pays the object and deducts tax
+    
+    local taxAmount = (self.income * (self.tax / 100))
+    
+    self.money += self.income  - taxAmount
+    citizenHandler.government.money += taxAmount
+    
+    return self.money
+    
+end
+
+function citizenHandler:Deduct(...: any) -- Uses recursion, deducts set vars i.e living costs, fines, etc
+    
+    local args = {...}
+        
+    if table.find(args, "living") then
+                
+        self.money -= citizenHandler.variableCosts.costOfLiving    
+        table.remove(args, table.find(args, "living"))
+            
+        self:Deduct(table.unpack(args))        
+        
+    elseif table.find(args, "fined") then
+        
+        self.money -= citizenHandler.variableCosts.fines
+        table.remove(args, table.find(args, "fined"))
+        
+        self:Deduct(table.unpack(args))        
+
+    elseif table.find(args, "business") then
+        
+        self.money -= citizenHandler.variableCosts.businessStartup
+        table.remove(args, table.find(args, "fined"))
+        
+        self:Deduct(table.unpack(args))
+        
+    end
+    
+    return self.money
+    
+end
+function citizenHandler:CalculateHappiness()
+    
+    self.happiness = self.money / 20
+    return self.happiness
+    
+end
+
+function citizenHandler:CalculateEconomicClass()
+    
+    if self.money <= 1000 then
+        self.class = "poor"
+        
+    elseif self.money > 1000 and self.money < 2000 then
+        self.class = "average"
+        
+    elseif self.money >= 2000 then
+        self.class = "rich"
+        
+    end
+    
+    return self.class
+    
+end
+
+-- Class Functions
+function citizenHandler.PayAllCitizens()
+    for i, v in pairs(citizenHandler.citizens) do
+        v:Pay()
+    end
+end
+
+function citizenHandler.DeductAllCitizens(...)
+    for i, v in pairs(citizenHandler.citizens) do
+        v:Deduct(...)
+    end
+end
+
+function citizenHandler.GetCirculatingCash()
+    
+    local cash = 0
+    for _, v in next, citizenHandler.citizens do
+        cash += v.money
+        
+    end    
+    return cash
+    
+end
+
+function citizenHandler.UpdateEconomicClasses()
+    
+    for _, v in next, citizenHandler.citizens do
+        v:CalculateEconomicClass()
+        
+    end
+    
+end
+
+function citizenHandler.GetAverageHappiness()
+    
+    local happiness = 0
+    for _, v in next, citizenHandler.citizens do
+        
+        happiness += v.happiness
+        
+    end
+        
+    return math.floor(happiness / GetLengthOfDict(citizenHandler.citizens))
+end
+
+return citizenHandler
